@@ -186,7 +186,8 @@ function mapLib.google_tiles_to_path(tile_x, tile_y, level)
 end
 
 function mapLib.gmapcatcher_tiles_to_path(tile_x, tile_y, level)
-  return string.format("/%d/%.0f/%.0f/%.0f/s_%.0f.png", level, tile_x/1024, tile_x%1024, tile_y/1024, tile_y%1024)
+  -- The division produced a decimal number, which was then rounded up. Rounding up should not occur. Hence the change
+  return string.format("/%d/%.0f/%.0f/%.0f/s_%.0f.png", level, tile_x//1024, tile_x%1024, tile_y//1024, tile_y%1024)
 end
 
 function mapLib.getTileBitmap(tilePath)
