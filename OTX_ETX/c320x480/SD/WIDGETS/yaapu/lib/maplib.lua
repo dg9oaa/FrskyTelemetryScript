@@ -192,7 +192,7 @@ local function google_tiles_to_path(tile_x, tile_y, level)
 end
 
 local function gmapcatcher_tiles_to_path(tile_x, tile_y, level)
-  return string.format("/%d/%d/%d/%d/s_%d.png", level, tile_x/1024, tile_x%1024, tile_y/1024, tile_y%1024)
+  return string.format("/%d/%d/%d/%d/s_%d.png", level, tile_x//1024, tile_x%1024, tile_y//1024, tile_y%1024)
 end
 
 local function qgis_tiles_to_path(tile_x, tile_y, level)
