@@ -217,6 +217,9 @@ local status = {
     gpsSource = nil,
     mapTilesStorage = 1,
     mapTilesStoragePathPrefix = "SD:",
+    -- zoom adjustment via physical dial/knob
+    mapZoomAdjustment = nil,
+    mapZoomCalc = false,
   },
 
   -- gps fix status
@@ -322,6 +325,8 @@ local status = {
   -- maps
   screenTogglePage = 1,
   mapZoomLevel = 19,
+  mapZoomSteps = 0,
+  mapZoomRange = 0,
   -- flightmode
   strFlightMode = nil,
   modelString = nil,
@@ -794,6 +799,35 @@ local sportPacket = {
   data = 0,
 }
 
+local function checkZoomAdjustment()
+  if status.conf.mapZoomAdjustment == nil then
+    return
+  end
+  -- calculate step count and step size once; reset mapZoomCalc to false on config change
+  if status.conf.mapZoomCalc == false then
+    local steps = 0
+    for _ = status.conf.gmapZoomMin, status.conf.gmapZoomMax do
+      steps = steps + 1
+    end
+    status.mapZoomSteps = steps
+    status.mapZoomRange = 200 // (steps - 1)
+    status.conf.mapZoomCalc = true
+  end
+  -- map source value (-100..+100) to the nearest zoom level
+  local sourceVal = status.conf.mapZoomAdjustment:value()
+  local step = 0
+  for i = status.conf.gmapZoomMin, status.conf.gmapZoomMax do
+    if math.abs((-100 + status.mapZoomRange * step) - sourceVal) <= 5 then
+      if status.mapZoomLevel ~= i then
+        system.playHaptic(150)
+      end
+      status.mapZoomLevel = i
+      break
+    end
+    step = step + 1
+  end
+end
+
 -- 5Hz
 local function task1(now)
   -- update GPS coordinates
@@ -815,6 +849,8 @@ local function task1(now)
 
   -- update total distance as often as po
   libs.utils.updateTotalDist()
+
+  checkZoomAdjustment()
 end
 
 -- 2Hz
@@ -1564,6 +1600,15 @@ local function configure(widget)
 
   line = form.addLine("Enable map grid")
   form.addBooleanField(line, nil, function() return status.conf.enableMapGrid end, function(value) status.conf.enableMapGrid = value end)
+
+  line = form.addLine("Zoom adjustment source")
+  form.addSourceField(line, nil,
+    function() return status.conf.mapZoomAdjustment end,
+    function(value)
+      status.conf.mapZoomAdjustment = value
+      status.conf.mapZoomCalc = false
+    end
+  )
 end
 
 local function applyConfig()
@@ -1661,6 +1706,7 @@ local function read(widget)
   status.conf.gpsSource = storageToConfig("gpsSource", nil)
   status.conf.languageId = storageToConfig("language", nil)
   status.conf.mapTilesStorage = storageToConfig("mapTilesStorage", nil)
+  status.conf.mapZoomAdjustment = storageToConfig("mapZoomAdjustment", nil)
   -- apply config
   applyConfig()
 end
@@ -1716,6 +1762,8 @@ local function write(widget)
   storage.write("gpsSource", status.conf.gpsSource)
   storage.write("language", status.conf.languageId)
   storage.write("mapTilesStorage", status.conf.mapTilesStorage)
+  storage.write("mapZoomAdjustment", status.conf.mapZoomAdjustment)
+  status.conf.mapZoomCalc = false
   -- apply config
   applyConfig()
 
