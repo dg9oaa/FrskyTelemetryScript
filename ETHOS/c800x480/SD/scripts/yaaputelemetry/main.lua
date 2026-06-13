@@ -582,6 +582,9 @@ local function initLibs()
   if libs.sportLib == nil then
     libs.sportLib = loadLib("sport")
   end
+  if libs.configStorage == nil then
+    libs.configStorage = loadLib("configStorage")
+  end
 end
 
 function checkLandingStatus()
@@ -731,8 +734,12 @@ local function createOnce(widget)
   end
 
   libs.utils.stopTimer()
-  -- get a reference to the plotSources table
-  --status.plotSources = menuLib.plotSources
+
+  -- write startup snapshot if init file exists
+  if libs.configStorage.hasInitFile() then
+    libs.configStorage.writeSnapshot(widget)
+    libs.utils.pushMessage(7, "Config snapshot saved to " .. libs.configStorage.getStorageLabel())
+  end
 end
 
 local function reset(widget)
@@ -1564,6 +1571,15 @@ local function configure(widget)
 
   line = form.addLine("Enable map grid")
   form.addBooleanField(line, nil, function() return status.conf.enableMapGrid end, function(value) status.conf.enableMapGrid = value end)
+
+  if libs.configStorage ~= nil then
+    line = form.addLine("Config file (" .. libs.configStorage.getStorageLabel() .. ")")
+    form.addTextButton(line, nil, "Save config to file", function()
+      if libs.configStorage.writeInitFile(widget) then
+        libs.utils.pushMessage(7, "Config saved to " .. libs.configStorage.getStorageLabel())
+      end
+    end)
+  end
 end
 
 local function applyConfig()
@@ -1661,6 +1677,11 @@ local function read(widget)
   status.conf.gpsSource = storageToConfig("gpsSource", nil)
   status.conf.languageId = storageToConfig("language", nil)
   status.conf.mapTilesStorage = storageToConfig("mapTilesStorage", nil)
+  status.conf.mapZoomAdjustment = storageToConfig("mapZoomAdjustment", nil)
+  -- try JSON init file first; Ethos storage is the fallback
+  if libs.configStorage ~= nil and libs.configStorage.hasInitFile() then
+    libs.configStorage.readInitFile(widget)
+  end
   -- apply config
   applyConfig()
 end
@@ -1716,6 +1737,10 @@ local function write(widget)
   storage.write("gpsSource", status.conf.gpsSource)
   storage.write("language", status.conf.languageId)
   storage.write("mapTilesStorage", status.conf.mapTilesStorage)
+  -- also write JSON init file
+  if libs.configStorage ~= nil then
+    libs.configStorage.writeInitFile(widget)
+  end
   -- apply config
   applyConfig()
 
