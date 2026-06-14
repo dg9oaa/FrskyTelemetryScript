@@ -6,8 +6,6 @@ local libs = nil
 local MAX_SNAPSHOTS = 50
 local storagePrefix = nil
 local configDir = nil
-local initFile = nil
-local indexFile = nil
 
 -- keys that hold Ethos source objects → serialized by name
 local SOURCE_KEYS = {
@@ -28,6 +26,18 @@ local SKIP_KEYS = {
   mapZoomCalc=true,
 }
 
+local function sanitizeModelName(name)
+  return (name:gsub("[^%w%-]", "_"):gsub("_+", "_"):gsub("^_+", ""):gsub("_+$", ""))
+end
+
+local function getInitFile()
+  return configDir .. "/config_" .. sanitizeModelName(model.name()) .. ".json"
+end
+
+local function getIndexFile()
+  return configDir .. "/index_" .. sanitizeModelName(model.name()) .. ".json"
+end
+
 local function readFile(path)
   local f = io.open(path, "r")
   if f == nil then return nil end
@@ -42,15 +52,13 @@ local function readFile(path)
 end
 
 local function detectPrefix()
-  -- SD card: check if init file already exists there
-  local f = io.open("SD:/scripts/yaaputelemetry/config/config.json", "r")
-  if f ~= nil then f:close(); return "SD:" end
-  -- SD card: probe by attempting a write
-  io.mkdir("SD:/scripts/yaaputelemetry/config")
-  f = io.open("SD:/scripts/yaaputelemetry/config/.probe", "w")
-  if f ~= nil then f:close(); return "SD:" end
-  -- fall back to internal storage
-  io.mkdir("RADIO:/scripts/yaaputelemetry/config")
+  -- probe SD card by attempting a write (directory must already exist)
+  local f = io.open("SD:/scripts/yaaputelemetry/config/.probe", "w")
+  if f ~= nil then
+    f:close()
+    pcall(function() os.remove("SD:/scripts/yaaputelemetry/config/.probe") end)
+    return "SD:"
+  end
   return "RADIO:"
 end
 
@@ -71,24 +79,14 @@ local function jsonValue(key, v)
   return "null"
 end
 
-local function serialize(conf, widgetConf)
-  local lines = {"{"}
-  -- widget-level settings
-  for _, k in ipairs({"screen","centerPanelIndex","leftPanelIndex","rightPanelIndex"}) do
-    lines[#lines+1] = string.format('  "%s": %s,', k, jsonValue(k, widgetConf[k]))
-  end
-  -- conf settings (sorted for readability)
+local function serializeFlat(data)
   local keys = {}
-  for k in pairs(conf) do
-    if not SKIP_KEYS[k] then keys[#keys+1] = k end
-  end
+  for k in pairs(data) do keys[#keys+1] = k end
   table.sort(keys)
-  for _, k in ipairs(keys) do
-    lines[#lines+1] = string.format('  "%s": %s,', k, jsonValue(k, conf[k]))
-  end
-  -- remove trailing comma from last real entry
-  if #lines > 1 then
-    lines[#lines] = lines[#lines]:sub(1, -2)
+  local lines = {"{"}
+  for i, k in ipairs(keys) do
+    local comma = (i < #keys) and "," or ""
+    lines[#lines+1] = string.format('  "%s": %s%s', k, jsonValue(k, data[k]), comma)
   end
   lines[#lines+1] = "}"
   return table.concat(lines, "\n")
@@ -131,7 +129,7 @@ local function restoreSources(conf)
 end
 
 local function readIndex()
-  local content = readFile(indexFile)
+  local content = readFile(getIndexFile())
   if content == nil then return {} end
   local list = {}
   for fname in content:gmatch('"([^"]+)"') do
@@ -141,7 +139,7 @@ local function readIndex()
 end
 
 local function writeIndex(list)
-  local f = io.open(indexFile, "w")
+  local f = io.open(getIndexFile(), "w")
   if f == nil then return end
   f:write("[\n")
   for i, fname in ipairs(list) do
@@ -151,62 +149,94 @@ local function writeIndex(list)
   f:close()
 end
 
+local function buildData(widget)
+  local data = {}
+  for k, v in pairs(status.conf) do
+    if not SKIP_KEYS[k] then data[k] = v end
+  end
+  local idx = tostring(widget.instanceIndex or 1)
+  local p = "instance_" .. idx .. "_"
+  data[p .. "screen"]           = widget.screen
+  data[p .. "centerPanelIndex"] = widget.centerPanelIndex
+  data[p .. "leftPanelIndex"]   = widget.leftPanelIndex
+  data[p .. "rightPanelIndex"]  = widget.rightPanelIndex
+  return data
+end
+
 -- public API
 
 function configStorage.init(s, l)
   status = s
   libs = l
   storagePrefix = detectPrefix()
-  configDir  = storagePrefix .. "/scripts/yaaputelemetry/config"
-  initFile   = configDir .. "/config.json"
-  indexFile  = configDir .. "/config_index.json"
+  configDir = storagePrefix .. "/scripts/yaaputelemetry/config"
 end
 
 function configStorage.hasInitFile()
-  local f = io.open(initFile, "r")
+  local f = io.open(getInitFile(), "r")
   if f ~= nil then f:close(); return true end
   return false
 end
 
 function configStorage.readInitFile(widget)
-  local content = readFile(initFile)
+  local content = readFile(getInitFile())
   if content == nil or #content < 2 then return false end
   local data = deserialize(content)
-  -- widget-level settings
-  if data.screen            ~= nil then widget.screen            = data.screen            end
-  if data.centerPanelIndex  ~= nil then widget.centerPanelIndex  = data.centerPanelIndex  end
-  if data.leftPanelIndex    ~= nil then widget.leftPanelIndex    = data.leftPanelIndex    end
-  if data.rightPanelIndex   ~= nil then widget.rightPanelIndex   = data.rightPanelIndex   end
-  -- conf settings
+  -- apply conf settings
   for k, v in pairs(data) do
     if status.conf[k] ~= nil or SOURCE_KEYS[k] then
       status.conf[k] = v
     end
   end
   restoreSources(status.conf)
+  -- apply this instance's screen settings
+  local idx = tostring(widget.instanceIndex or 1)
+  local p = "instance_" .. idx .. "_"
+  if data[p .. "screen"]           ~= nil then widget.screen           = data[p .. "screen"]           end
+  if data[p .. "centerPanelIndex"] ~= nil then widget.centerPanelIndex = data[p .. "centerPanelIndex"] end
+  if data[p .. "leftPanelIndex"]   ~= nil then widget.leftPanelIndex   = data[p .. "leftPanelIndex"]   end
+  if data[p .. "rightPanelIndex"]  ~= nil then widget.rightPanelIndex  = data[p .. "rightPanelIndex"]  end
   return true
 end
 
 function configStorage.writeInitFile(widget)
-  local f = io.open(initFile, "w")
+  -- read existing JSON to preserve other instances' settings
+  local data = {}
+  local existing = readFile(getInitFile())
+  if existing ~= nil and #existing >= 2 then
+    data = deserialize(existing)
+  end
+  -- update conf keys
+  for k, v in pairs(status.conf) do
+    if not SKIP_KEYS[k] then data[k] = v end
+  end
+  -- update this instance's screen settings
+  local idx = tostring(widget.instanceIndex or 1)
+  local p = "instance_" .. idx .. "_"
+  data[p .. "screen"]           = widget.screen
+  data[p .. "centerPanelIndex"] = widget.centerPanelIndex
+  data[p .. "leftPanelIndex"]   = widget.leftPanelIndex
+  data[p .. "rightPanelIndex"]  = widget.rightPanelIndex
+  -- write
+  local f = io.open(getInitFile(), "w")
   if f == nil then return false end
-  f:write(serialize(status.conf, widget))
+  f:write(serializeFlat(data))
   f:close()
   return true
 end
 
 function configStorage.writeSnapshot(widget)
+  local modelName = sanitizeModelName(model.name())
   local ts = os.date("%Y-%m-%d_%H-%M-%S")
-  local fname = "config_" .. ts .. ".json"
+  local fname = "config_" .. modelName .. "_" .. ts .. ".json"
   local snapPath = configDir .. "/" .. fname
-  -- prepend snapshot timestamp as first field
-  local body = serialize(status.conf, widget)
-  local json = '{\n  "__snapshot__": "' .. ts .. '",' .. body:sub(2)
+  local data = buildData(widget)
+  data["__model__"]    = model.name()
+  data["__snapshot__"] = ts
   local f = io.open(snapPath, "w")
   if f == nil then return end
-  f:write(json)
+  f:write(serializeFlat(data))
   f:close()
-  -- update index and prune oldest over limit
   local list = readIndex()
   list[#list+1] = fname
   while #list > MAX_SNAPSHOTS do

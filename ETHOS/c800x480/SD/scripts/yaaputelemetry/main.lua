@@ -736,7 +736,7 @@ local function createOnce(widget)
   libs.utils.stopTimer()
 
   -- write startup snapshot if init file exists
-  if libs.configStorage.hasInitFile() then
+  if libs.configStorage ~= nil and libs.configStorage.hasInitFile() then
     libs.configStorage.writeSnapshot(widget)
     libs.utils.pushMessage(7, "Config snapshot saved to " .. libs.configStorage.getStorageLabel())
   end
@@ -1245,6 +1245,8 @@ local function create()
       status.initPending = true
     end
 
+    status.instanceCount = (status.instanceCount or 0) + 1
+
     initLibs()
 
     return {
@@ -1256,6 +1258,7 @@ local function create()
       ------------------
       -- widget config
       ------------------
+      instanceIndex = status.instanceCount,
       ready = false,
       runBgTasks = false,
       -- screen type
@@ -1679,9 +1682,9 @@ local function read(widget)
   status.conf.mapTilesStorage = storageToConfig("mapTilesStorage", nil)
   status.conf.mapZoomAdjustment = storageToConfig("mapZoomAdjustment", nil)
   -- try JSON init file first; Ethos storage is the fallback
-  if libs.configStorage ~= nil and libs.configStorage.hasInitFile() then
-    libs.configStorage.readInitFile(widget)
-  end
+  --if libs.configStorage ~= nil and libs.configStorage.hasInitFile() then
+  --  libs.configStorage.readInitFile(widget)
+  --end
   -- apply config
   applyConfig()
 end
@@ -1737,10 +1740,6 @@ local function write(widget)
   storage.write("gpsSource", status.conf.gpsSource)
   storage.write("language", status.conf.languageId)
   storage.write("mapTilesStorage", status.conf.mapTilesStorage)
-  -- also write JSON init file
-  if libs.configStorage ~= nil then
-    libs.configStorage.writeInitFile(widget)
-  end
   -- apply config
   applyConfig()
 
